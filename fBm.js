@@ -6,31 +6,42 @@ function noiseinit(){
     precision mediump float;
     #endif
     
-
-    float random12(vec2 p, float s){
-        p = mod(p,s);
-        p += 0.5;
-
-        vec3 p3  = fract(vec3(p.xyx) * .1031);
-        p3 += dot(p3, p3.yzx + 33.33);
-        return fract((p3.x + p3.y) * p3.z);
+    
+    vec3 uv_to_uvw(vec2 uv, vec2 tiling) {
+        uv.y = 1.0-uv.y;
+        vec3 uvw = vec3(mod(uv * tiling, vec2(1.0)), 0.0);
+        uvw.z = floor(uv.x * tiling.x) + floor(uv.y * tiling.y) * tiling.x;
+        uvw.z /= tiling.x * tiling.y;
+        return uvw;
     }
 
-    float noise2d(vec2 st, float s) {
-        st *= s;
-        vec2 i = floor(st);
-        vec2 f = fract(st);
-
-        float a = random12(i, s);
-        float b = random12(i + vec2(1.0, 0.0), s);
-        float c = random12(i + vec2(0.0, 1.0), s);
-        float d = random12(i + vec2(1.0, 1.0), s);
+    float random31(vec3 p3, float s) {
+        p3 = mod(p3,vec3(s))+0.5;
+        p3  = fract(p3 * .1031);
+        p3 += dot(p3, p3.zyx + 31.32);
+        return fract((p3.x + p3.y) * p3.z);
+    }
+    
+    float noise3d( vec3 uvw, float s ){
+        uvw *= s;
+        vec3 u = fract(uvw);
+        vec3 i = floor(uvw);
         
-        vec2 u = smoothstep(0.,1.,f);
+        float a = random31( i, s );
+        float b = random31( i+vec3(1.0,0.0,0.0), s );
+        float c = random31( i+vec3(0.0,1.0,0.0), s );
+        float d = random31( i+vec3(1.0,1.0,0.0), s );
+        float e = random31( i+vec3(0.0,0.0,1.0), s );
+        float f = random31( i+vec3(1.0,0.0,1.0), s );
+        float g = random31( i+vec3(0.0,1.0,1.0), s );
+        float h = random31( i+vec3(1.0,1.0,1.0), s );
         
-        return mix(a, b, u.x) +
-                (c - a)* u.y * (1.0 - u.x) +
-                (d - b) * u.x * u.y;
+        u = smoothstep(0.0,1.0,u); // uncomment for linear
+        
+        return mix(mix(mix( a, b, u.x),
+                           mix( c, d, u.x), u.y),
+                       mix(mix( e, f, u.x),
+                           mix( g, h, u.x), u.y), u.z);
     }
 
     varying vec2 uv;
@@ -38,23 +49,25 @@ function noiseinit(){
     uniform float roughness;
     uniform int octaves;
 
-    float fBm(vec2 x) {
+    float fBm(vec3 x) {
         float v = 0.0;
         float a = 0.5;
         float s = scale;
-        vec2 shift = vec2(100.0);
+        vec3 shift = vec3(100.0);
         
         for (int i = 0; i < 10; i++) {
             if (i >= octaves) { break; } 
-            v += a * noise2d(x,s);
+            v += a * noise3d(x,s);
             s = s * 2.0;
             a *= roughness;
         }
         return v;
     }
-
+    
+    uniform float slice_count;
     void main(){
-        gl_FragColor.rgb = vec3( fBm(uv) );
+        vec3 uvw = uv_to_uvw(uv,vec2(slice_count));
+        gl_FragColor.rgb = vec3( fBm(uvw) );
         gl_FragColor.a = 1.0;
     }
     `
@@ -98,7 +111,8 @@ function noiseinit(){
             "scale": {
                 ui_name: "Scale",
                 type: "floatEntry",
-                default: 10
+                default: 10,
+                step: 1
             },
             "octaves": {
                 ui_name: "Octaves",
@@ -113,6 +127,16 @@ function noiseinit(){
                 step: 0.1,
                 max: 0.5
             },
+
+            "slice_count": {
+                ui_name: "Slice Count",
+                type: "floatSlider",
+                default: 4,
+                step: 1,
+                min: 1,
+                max: 64,
+                isSliceCount: true
+            }
         }
     }
 

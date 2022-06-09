@@ -1,7 +1,3 @@
-function modulo(x,n) {
-    return ((x % n) + n) % n;
-};
-
 class vec2 {
     x;
     y;
@@ -50,8 +46,8 @@ class vec2 {
     mod(b){
         // console.log("a = ", this, "b =", b)
         return new vec2(
-            modulo(this.x,b.x),
-            modulo(this.y,b.y)
+            ( (this.x % b.x) + b.x ) % b.x,
+            ( (this.y % b.y) + b.y ) % b.y
         );
     }
     // Remainder operator
@@ -62,15 +58,15 @@ class vec2 {
     sin()   { return new vec2( Math.sin(this.x), Math.sin(this.y) ); }
     hash2(){
         let p3 = this.sw3("xyx").mul( new vec3(.1031, .1030, .0973) ).fract();
-        let a = p3.dot( p3.sw("yzx").add( new vec3( 33.33 ) ) );
+        let a = p3.dot( p3.sw3("yzx").add( new vec3( 33.33 ) ) );
         p3 = p3.add( new vec3(a) );
         return p3.sw2("xx").add( p3.sw2("yz") ).mul( p3.sw2("zy") ).fract();
     }
     hash3(){
         let p3 = this.sw3("xyx").mul( new vec3(.1031, .1030, .0973) ).fract();
-        let a = p3.dot( p3.sw("yxz").add( new vec3( 33.33 ) ) );
+        let a = p3.dot( p3.sw3("yxz").add( new vec3( 33.33 ) ) );
         p3 = p3.add( new vec3(a) );
-        return p3.sw("xxy").add( p3.sw("yzz") ).mul( p3.sw("zyx") ).fract();
+        return p3.sw3("xxy").add( p3.sw3("yzz") ).mul( p3.sw3("zyx") ).fract();
     }
 }
 
@@ -92,7 +88,7 @@ class vec3 {
                 break;
         }
     }
-    sw(s = "xyy"){
+    sw3(s = "xyy"){
         let arr = []
         arr.length = 3
         for(let i=0; i<3; i++){
@@ -150,15 +146,16 @@ class vec3 {
             this.z % b.z
         );
     }
-    fract() { return this.mod( new vec3(1.0,1.0,1.0) ); }
+    fract() { return this.mod( new vec3(1.0) ); }
     floor() { return new vec3( Math.floor(this.x), Math.floor(this.y), Math.floor(this.z) ); }
     ceil()  { return new vec3( Math.ceil(this.x), Math.ceil(this.y), Math.ceil(this.z) ); }
     sin()   { return new vec3( Math.sin(this.x), Math.sin(this.y), Math.sin(this.z) ); }
+    sqrt()   { return new vec3( Math.sqrt(this.x), Math.sqrt(this.y), Math.sqrt(this.z) ); }
 }
 
 var didYouKnowEl = document.getElementById("didukno")
 var facts = [
-    "Mali's GPUs are made from gluing Pentiums with the FDIV bug together",
+    "Mali GPUs are made from gluing Pentiums with the FDIV bug together",
     "GPUs do not have infinite precision. <i>CPUs do</i>",
     "Gaming laptops have integrated handwarmers on the keyboard",
     "This would be going faster if I built it in WASM",
@@ -166,7 +163,17 @@ var facts = [
     "You should hydrate",
     "They call it the oven because you of in the cold food of out hot eat the food",
     "Anisotropic mipmaps weren't officially in OpenGL until 4.0 because it was too powerful",
-    "Unity has more features than an aircraft"
+    "Unity has more features than an aircraft",
+    "Inigo Quilez created GLSL. To fuel his god complex",
+    "Using trigonometry functions in code is a sign you've lost someone close to you and are trying to cope",
+    "WebGL renders scenes in sRGB. Or linear color. Nope, probably sRGB. Eh, maybe lin...",
+    "Violence isn't the answer to this one.",
+    "Gaming",
+    "Live-update rendering was added on 2022-03-11.<br>Before that, you had to wait in silence while your browser froze.",
+    "This tool was created because I wanted a texture generator, but was too lazy to learn desktop OpenGL",
+    "All output images from this tool are 8-bit color.",
+    "Programming socks: they make a difference.",
+    "Shadertoy is good competition.",
 ]
 
 function showDidYouKnow(){
@@ -182,10 +189,13 @@ function hideDidYouKnow(){
 
 var default_vert = `
 attribute vec4 position;
+// attribute vec2 texcoord0;
+
 varying vec2 uv;
 void main(){
     gl_Position = position;
     uv = (position.xy+1.0)*0.5;
+    // uv = texcoord0;
 }
 `
 var default_frag = `
@@ -253,6 +263,40 @@ function createProgram(gl, vertexShader, fragmentShader) {
     gl.deleteProgram(program);
 }
 
+let resMul = 1
+
+function showUniformElementIf(uniforms, this_uniform, this_div) {
+    let showdef = this_uniform["showIf"]
+    
+    let uniToCheck = uniforms[ showdef["uniform"] ]
+    let valueToCompare = showdef["value"]
+
+    let showOrHide = function(){
+        let res = "none"
+        if (arguments[0] == true)
+        { res = "block" }
+        
+        this_div.style.display = res
+    }
+    
+    let showIfFunc
+    switch ( showdef["op"] )
+    {
+        case ">":
+            showIfFunc = function(){
+                return showOrHide(uniToCheck.value > valueToCompare)
+            }
+            break;
+        default: // Assume you want Equals operator
+            showIfFunc = function(){
+                return showOrHide(uniToCheck.value == valueToCompare)
+            }
+            break;
+    }
+    showIfFunc()
+    uniToCheck.element.addEventListener("change",showIfFunc)
+}
+
 function setupUniforms(uniforms) {
     // Clear uniform elements already present
     var uniDiv = document.getElementById("uni")
@@ -264,10 +308,26 @@ function setupUniforms(uniforms) {
         // New element for uniform
         let newInput
 
-        let myDiv = uniDiv
+        let myDiv = document.createElement("div")
+        let mySibling
+        
 
-        let inputChangedFunc
+        let changeFunc
+        let inputFunc
 
+        // Special styling uniforms with reserved keywords
+        let isStylingChange = false
+        switch(key) {
+            case "_newline": 
+                uniDiv.appendChild( document.createElement("br") )
+                continue
+            case "_label":
+                myDiv.innerHTML = this_uniform.text
+                myDiv.style.opacity = 0.5
+                showUniformElementIf(uniforms,this_uniform,myDiv)
+                uniDiv.appendChild( myDiv )
+                continue
+        }
 
         switch(this_uniform["type"]){
             // Boolean checkbox
@@ -275,7 +335,7 @@ function setupUniforms(uniforms) {
                 newInput = document.createElement("input")
                 newInput.type = "checkbox"
                 
-                inputChangedFunc = function() {
+                changeFunc = function() {
                     this_uniform.value = this.checked
                 }
 
@@ -292,7 +352,7 @@ function setupUniforms(uniforms) {
                     newInput.appendChild(optEl)
                 }
                 
-                inputChangedFunc = function(){
+                changeFunc = function(){
                     this_uniform.value = this.selectedIndex
                 }
 
@@ -302,17 +362,56 @@ function setupUniforms(uniforms) {
             case "intEntry":
                 newInput = document.createElement("input")
                 newInput.type = "number"
-                newInput.step = 1
 
-                if (this_uniform.step || this_uniform.type !== "intEntry") {
-                    newInput.step = this_uniform.step
+                if (this_uniform.type == "intEntry") {
+                    newInput.step = 1;
+                } else if (this_uniform.step) {
+                    newInput.step = this_uniform.step;
+                } else {
+                    newInput.step = 0.1
                 }
                 
                 newInput.min = this_uniform.min
                 newInput.max = this_uniform.max
 
-                inputChangedFunc = function(){
+                changeFunc = function(){
                     this_uniform.value = this.value
+                }
+                
+                break;
+            // Number slider
+            case "floatSlider":
+            case "intSlider":
+                newInput = document.createElement("input")
+                newInput.type = "range"
+
+                let numberDisplay = document.createElement("span")
+                mySibling = numberDisplay
+
+                if (this_uniform.type == "intSlider") {
+                    newInput.step = 1;
+                } else if (this_uniform.step) {
+                    newInput.step = this_uniform.step;
+                } else {
+                    newInput.step = 0.1
+                }
+                
+                newInput.min = this_uniform.min;
+                newInput.max = this_uniform.max;
+
+                inputFunc = function(){
+                    this_uniform.value = this.value;
+                    numberDisplay.innerHTML = String( this.value );
+                    renderGL();
+                }
+
+                if (this_uniform.isSliceCount) {
+                    inputFunc = function(){
+                        resMul = this.value;
+                        this_uniform.value = this.value;
+                        numberDisplay.innerHTML = String( this.value );
+                        renderGL();
+                    }
                 }
                 
                 break;
@@ -321,60 +420,38 @@ function setupUniforms(uniforms) {
         this_uniform.element = newInput
 
         if(this_uniform.default){
+            console.log(this_uniform.default)
             newInput.value = this_uniform.default
         }
 
         
-        let showIfFunc
-        let uniToCheck
         if(this_uniform["showIf"]){
-            let showdef = this_uniform["showIf"]
-            
-            uniToCheck = uniforms[ showdef["uniform"] ]
-            let valueToCompare = showdef["value"]
-
-            myDiv = document.createElement("div")
-            uniDiv.appendChild(myDiv)
-
-            let showOrHide = function(){
-                let res = "none"
-                if (arguments[0] == true)
-                { res = "block" }
-                
-                myDiv.style.display = res
-            }
-            
-            switch ( showdef["op"] )
-            {
-                case ">":
-                    showIfFunc = function(){
-                        return showOrHide(uniToCheck.value > valueToCompare)
-                    }
-                    break;
-                default: // Assume you want Equals operator
-                    showIfFunc = function(){
-                        return showOrHide(uniToCheck.value == valueToCompare)
-                    }
-                    break;
-            }
-            showIfFunc()
-            uniToCheck.element.addEventListener("change",showIfFunc)
+            showUniformElementIf(uniforms,this_uniform,myDiv)
         }
         
         
 
         myDiv.appendChild(document.createTextNode(this_uniform.ui_name +": "))
         myDiv.appendChild(newInput)
+        if (mySibling) {
+            myDiv.appendChild(mySibling)
+        }
         myDiv.appendChild(document.createElement("br"))
+        uniDiv.appendChild(myDiv)
 
-        newInput.addEventListener("change",inputChangedFunc)
+        newInput.addEventListener("change",changeFunc)
+        newInput.addEventListener("input",inputFunc)
+
+        // Force set default values to GL uniforms
         newInput.dispatchEvent(new Event("change"))
+        newInput.dispatchEvent(new Event("input"))
+
         newInput.addEventListener("change",render)
     }
 }
 
 function updateUniformsGL() {
-    if (current_kernel == undefined) {
+    if (!current_kernel) {
         console.log("KERNEL UNDEFINED")
         return
     }
@@ -382,11 +459,13 @@ function updateUniformsGL() {
         let uniform = current_kernel.uniforms[key]
         switch(uniform["type"]) {
             case "intEntry":
+            case "intSlider":
             case "intOptions":
             case "checkbox":
                 gl.uniform1i(uniform.uniloc,uniform.value)
                 break;
             case "floatEntry":
+            case "floatSlider":
                 gl.uniform1f(uniform.uniloc,uniform.value)
                 break;
         }
@@ -410,36 +489,79 @@ function useShader(shadertext,uniforms){
             }
 }
 
-function renderGL() { 
-    canvasGL.width = document.getElementById("imgsize").value
-    canvasGL.height = canvasGL.width
+var _render_id = 0
+
+function renderGL() {
+    _render_id = -1
+    setCanvasResolution(canvasGL)
+    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
     
     updateUniformsGL()
-    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+    setTimeout(updateBackground,100)
 }
 
 function renderJS() {
-    canvasJSK.width = document.getElementById("imgsize").value
-    canvasJSK.height = canvasJSK.width
-    showDidYouKnow()
-    setTimeout(function(){
-        let res = new vec2(1.0/canvasJSK.width,1.0/canvasJSK.height)
-        for (let j=0; j < canvasJSK.height; j++){
-            for (let i=0; i < canvasJSK.width; i++){
-                let p = new vec2(i,j)
-                current_kernel.jsShader(ctx,p,p.mul(res),current_kernel.uniforms)
-            }
+    setCanvasResolution(canvasJSK)
+    if (!current_kernel.jsShader) {
+        didYouKnowEl.innerHTML = "No JS function defined for this kernel.<br>(see /voronoi.js for an example kernel with a JS implementation)"
+        return
+    }
+
+    let res = new vec2(1.0/canvasJSK.width,1.0/canvasJSK.height)
+
+    let img = ctx.createImageData(canvasJSK.width, 1);
+    let cur_y = 0
+
+    let drawLine = function() {
+        let offset = 0
+        for ( var x=0; x<canvasJSK.width; x++ ) {
+            let p = new vec2(x,cur_y)
+            let col = current_kernel.jsShader(ctx,p,p.mul(res),current_kernel.uniforms)
+            img.data[offset++] = col[0]
+            img.data[offset++] = col[1]
+            img.data[offset++] = col[2]
+            img.data[offset++] = col[3]
         }
-    },100)
-    setTimeout(hideDidYouKnow,1000)
+    }
     
+    _render_id += 1
+    let _this_renderid = _render_id
+    let _last_now = (new Date).getTime()
+
+    let scanline = function() {
+        if ( _render_id != _this_renderid ) {
+            return;
+        }
+        
+        var now = (new Date).getTime()
+
+        drawLine()
+        ctx.putImageData(img,0,cur_y)
+        cur_y++
+
+        if (cur_y < canvasJSK.height) {
+            if ( now - _last_now > 100 ) {
+
+                _last_now = now
+                setTimeout(scanline,0)
+            } else {
+                scanline();
+            }
+        } else {
+            hideDidYouKnow();
+            updateBackground();
+        }
+    }
+
+
+    showDidYouKnow();
+    scanline();
 }
 
 function render() {
     if (rendererSelector.selectedIndex == 0) { renderGL() }
     else { renderJS() }
-    setTimeout(updateBackground,100)
 }
 
 function getCanvas() {
@@ -455,9 +577,12 @@ var bgEl = document.getElementById("bg")
 function updateBackground(){
     let c = getCanvas()
     let imag = c.toDataURL('image/png')
-    let rect = c.getBoundingClientRect()
-    console.log(rect.right, rect.top)
     bgEl.style.backgroundImage = 'url('+ imag + ')'
+    positionBackground()
+}
+function positionBackground(){
+    let c = getCanvas()
+    let rect = c.getBoundingClientRect()
     bgEl.style.backgroundPositionX = rect.x + "px"
     bgEl.style.backgroundPositionY = rect.y + "px"
 }
@@ -474,16 +599,51 @@ canvasJSK.addEventListener("mouseleave",hideBackground)
 canvasGL.addEventListener("mouseenter",showBackground)
 canvasGL.addEventListener("mouseleave",hideBackground)
 
-var image_size = document.getElementById("imgsize")
-image_size.onchange = function(){
-    image_size.value = Math.min(image_size.max,image_size.value)
-    image_size.value = Math.max(0,image_size.value)
-    render()
+var image_size_x = document.getElementById("imgsizeX")
+var image_size_y = document.getElementById("imgsizeY")
+
+var img_square_box = document.getElementById("squareXYcheckbox")
+
+img_square_box.addEventListener("change",function(){
+    image_size_y.disabled = img_square_box.checked
+    if ( image_size_y.disabled ) {
+        image_size_y.value = image_size_x.value
+    }
+
+    image_size_y.dispatchEvent(new Event("change"))
+})
+
+function setCanvasResolution(c) {
+    c.width = image_size_x.value * resMul
+    c.height = image_size_y.value * resMul
 }
+
+function clampSize(self){
+    self.value = Math.min(self.max,self.value)
+    self.value = Math.max(0.0,     self.value)
+}
+
+image_size_x.addEventListener("change",function(){
+    if (image_size_y.disabled) {
+        image_size_y.value = image_size_x.value
+        image_size_y.dispatchEvent(new Event("change"))
+    }
+    clampSize(this)
+    render()
+})
+
+image_size_y.addEventListener("change",function(){
+    
+    clampSize(this)
+    render()
+})
+
+
 
 function setKernel(kernel){
     current_kernel = kernel
     console.log(kernel)
+
     setupUniforms(kernel.uniforms)
     useShader(current_kernel.glslShader,current_kernel.uniforms)
 }
@@ -563,5 +723,6 @@ function setRenderer(rendererIndex) {
 var rendererSelector = document.getElementById("rendererSelector")
 rendererSelector.onchange = function(){
     setRenderer(this.selectedIndex)
+    render()
 }
-rendererSelector.onchange()
+setRenderer(rendererSelector.selectedIndex)
